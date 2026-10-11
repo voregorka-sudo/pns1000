@@ -1,0 +1,1334 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Puzzles & Survival - Интерактивная схема</title>
+    <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- ExcelJS — для раскрывающихся списков и условного форматирования в шаблоне -->
+    <script src="https://unpkg.com/exceljs@4.4.0/dist/exceljs.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <style>
+        :root {
+            --bg-color: #0f1115; --panel-bg: #1a1d24; --accent: #ffb300; --accent-hover: #ffd000;
+            --text-color: #e0e0e0; --danger: #dc3545; --success: #28a745; --border: #333;
+            --cap-color: #ff4d4d; --sub-color: #ff9900;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+        
+        body {
+            color: var(--text-color);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow-x: hidden;
+            padding-bottom: 50px;
+            min-height: 100vh;
+            background-color: var(--bg-color);
+        }
+
+        /* Зацикленное видео на весь экран */
+        .video-background {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: -1;
+            pointer-events: none;
+        }
+
+        header { display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; background: rgba(26, 29, 36, 0.85); backdrop-filter: blur(6px); border-bottom: 2px solid var(--accent); position: sticky; top: 0; z-index: 100; gap: 10px; flex-wrap: wrap; }
+        .lang-switcher { display: flex; gap: 5px; }
+        .lang-switcher button, .header-btn { background: transparent; color: var(--text-color); border: 1px solid var(--accent); padding: 6px 12px; cursor: pointer; border-radius: 4px; font-weight: bold; transition: 0.3s; }
+        .lang-switcher button.active, .header-btn:hover { background: var(--accent); color: #000; }
+        
+        .game-map-container { position: relative; width: 95vw; max-width: 1200px; aspect-ratio: 2400 / 1792; margin: 30px auto; background-image: url('pic1.png'); background-size: 100% 100%; background-repeat: no-repeat; background-position: center; border: 2px solid var(--border); box-shadow: 0 0 20px rgba(0,0,0,0.8); }
+        .hotspot { position: absolute; border: 2px solid transparent; border-radius: 12px; transition: 0.3s; cursor: pointer; display: flex; justify-content: center; align-items: flex-end; padding-bottom: 5px; }
+        .hotspot:hover { border-color: rgba(0, 255, 255, 0.8); box-shadow: 0 0 15px rgba(0, 255, 255, 0.3); background: rgba(0, 255, 255, 0.05); }
+        .hotspot.active { border-style: solid; border-color: var(--accent); box-shadow: 0 0 20px var(--accent); background: rgba(255, 179, 0, 0.1); }
+        
+        .troop-badge { position: absolute; top: 15%; left: 50%; transform: translateX(-50%); width: 50%; height: 50%; object-fit: contain; opacity: 0; transition: opacity 0.3s ease; pointer-events: none; z-index: 5; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.8)); }
+        .hotspot.active .troop-badge { opacity: 1; }
+
+        .tech   { width: 25%; height: 30%; top: 35%; left: 37.5%; }
+        .north  { width: 18%; height: 20%; top: 0%; left: 41%; }
+        .south  { width: 18%; height: 20%; bottom: 0%; left: 41%; }
+        .west   { width: 18%; height: 20%; top: 40%; left: 0%; }
+        .east   { width: 18%; height: 20%; top: 40%; right: 0%; }
+        .object-label { background: rgba(0,0,0,0.7); padding: 2px 8px; border-radius: 4px; font-size: 12px; text-align: center; pointer-events: none; width: 100%; }
+        .shift-menu { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 5px; background: var(--panel-bg); border: 1px solid var(--accent); border-radius: 8px; padding: 5px; display: flex; gap: 5px; z-index: 10; display: none; }
+        .shift-menu button { background: #333; color: #fff; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .shift-menu button:hover { background: var(--accent); color: #000; }
+
+        /* Оранжевые квадратные кнопки на карте */
+        .map-btn {
+            position: absolute;
+            width: 8%;
+            aspect-ratio: 1 / 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            background: var(--accent);
+            border: 2px solid #b87d00;
+            border-radius: 12px;
+            color: #000;
+            font-family: inherit;
+            font-weight: bold;
+            font-size: clamp(8px, 0.9vw, 12px);
+            cursor: pointer;
+            transition: 0.3s;
+            z-index: 6;
+            padding: 2px;
+            overflow-wrap: break-word;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+        }
+        .map-btn:hover { background: var(--accent-hover); border-color: var(--accent-hover); box-shadow: 0 0 15px rgba(255, 179, 0, 0.5); }
+        .map-btn.active { border-color: #fff; box-shadow: 0 0 20px var(--accent-hover); }
+
+        /* Позиции кнопок */
+        .rules-btn-map { bottom: 10%; right: 10%; }
+        .alliances-btn-map { top: 10%; left: 10%; }
+        .search-btn-map { top: 10%; right: 10%; }
+        
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: none; justify-content: center; align-items: center; z-index: 200; padding: 10px; backdrop-filter: blur(4px); }
+        .modal-overlay.active { display: flex; }
+        .modal-box { background: var(--panel-bg); border: 1px solid var(--border); border-radius: 8px; width: 100%; max-width: 450px; max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .modal-header { padding: 15px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: #222; border-radius: 8px 8px 0 0; }
+        .modal-body { padding: 15px; overflow-y: auto; flex-grow: 1; }
+        .modal-footer { padding: 15px; border-top: 1px solid var(--border); display: flex; gap: 10px; flex-wrap: wrap; }
+        .close-btn { background: none; border: none; color: #fff; font-size: 24px; cursor: pointer; }
+        .btn { background: #333; color: #fff; border: 1px solid var(--border); padding: 10px 15px; cursor: pointer; border-radius: 4px; font-size: 14px; flex: 1; min-width: 120px; text-decoration: none; text-align: center; }
+        .btn:hover { background: #444; }
+        .btn-primary { background: var(--accent); color: #000; border-color: var(--accent); font-weight: bold; }
+        .btn-primary:hover { background: var(--accent-hover); }
+        .btn-danger { background: var(--danger); border-color: var(--danger); }
+        .btn-danger:hover { background: #c82333; }
+        .list-item { padding: 8px; background: #222; margin-bottom: 5px; border-radius: 4px; }
+        .empty-list { text-align: center; color: #888; padding: 20px; }
+        .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(100px); background: var(--success); color: #fff; padding: 12px 24px; border-radius: 8px; transition: 0.4s; z-index: 300; }
+        .toast.show { transform: translateX(-50%) translateY(0); }
+
+        .rules-text { white-space: pre-wrap; word-wrap: break-word; line-height: 1.7; font-size: 14px; }
+
+        /* Элементы списка альянсов — 3 кнопки копирования */
+        .alliance-item { border-left: 3px solid transparent; transition: background 0.2s, border-color 0.2s; }
+        .alliance-item:hover { background: #2a2a2a; border-left-color: var(--accent); }
+        .alliance-item-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+        .alliance-btns { display: flex; gap: 5px; }
+        .alliance-copy-btn {
+            flex: 1;
+            background: #333;
+            color: #fff;
+            border: 1px solid #444;
+            padding: 6px 4px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            font-family: inherit;
+            font-weight: bold;
+            transition: background 0.2s, border-color 0.2s, color 0.2s;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .alliance-copy-btn:hover { background: var(--accent); color: #000; border-color: var(--accent); }
+
+        /* ПОИСК — оформление */
+        .search-result-item { cursor: pointer; transition: background 0.2s; border-left: 3px solid transparent; }
+        .search-result-item:hover { background: #2a2a2a; border-left-color: var(--accent); }
+        .search-highlight { background: rgba(255, 179, 0, 0.35); color: #fff; font-weight: bold; border-radius: 2px; }
+        #search-input { margin-bottom: 10px; font-size: 15px; }
+        
+        .admin-panel { margin: 20px; padding: 20px; background: rgba(26, 29, 36, 0.9); backdrop-filter: blur(6px); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.5); }
+        .admin-section { margin-bottom: 20px; padding: 15px; border: 1px solid var(--border); border-radius: 6px; background: rgba(0,0,0,0.2); }
+        .admin-row { display: flex; gap: 5px; margin-bottom: 5px; align-items: center; }
+        .admin-input { flex: 1; background: #111; color: #fff; border: 1px solid #444; padding: 8px; border-radius: 4px; font-family: inherit; }
+        .icon-btn { background: #333; border: none; color: #fff; width: 34px; height: 34px; cursor: pointer; border-radius: 4px; font-size: 16px; }
+        .icon-btn:hover { background: #444; }
+        .icon-btn.danger { background: var(--danger); }
+        .danger-zone { border: 2px solid var(--danger); padding: 15px; border-radius: 6px; margin-top: 20px; background: rgba(220, 53, 69, 0.1); }
+        @media (max-width: 600px) { .object-label { font-size: 10px; } .modal-footer { flex-direction: column; } .btn { width: 100%; } }
+    </style>
+</head>
+<body>
+
+<!-- Видеофон (зациклен, без звука) -->
+<video class="video-background" id="bg-video" autoplay loop muted playsinline preload="auto" poster="Back.png" disablepictureinpicture>
+    <source src="back.mp4" type="video/mp4">
+</video>
+
+<header>
+    <div class="lang-switcher">
+        <button id="btn-ru" class="active" onclick="setLang('ru')">RU</button>
+        <button id="btn-en" onclick="setLang('en')">EN</button>
+        <button id="btn-ko" onclick="setLang('ko')">KO</button>
+        <button id="btn-ja" onclick="setLang('ja')">JA</button>
+    </div>
+    <button id="admin-btn" class="header-btn" onclick="toggleAdmin()">Войти</button>
+</header>
+
+<main>
+    <div class="game-map-container" id="map">
+        <div class="hotspot tech" data-id="tech" onclick="toggleShiftMenu('tech')">
+            <img src="" class="troop-badge" id="badge-tech" style="display: none;">
+            <span class="object-label" data-i18n="tech">Техноцентр</span>
+        </div>
+        <div class="hotspot north" data-id="north" onclick="toggleShiftMenu('north')">
+            <img src="" class="troop-badge" id="badge-north" style="display: none;">
+            <span class="object-label" data-i18n="north">Северная турель</span>
+        </div>
+        <div class="hotspot south" data-id="south" onclick="toggleShiftMenu('south')">
+            <img src="" class="troop-badge" id="badge-south" style="display: none;">
+            <span class="object-label" data-i18n="south">Южная турель</span>
+        </div>
+        <div class="hotspot west" data-id="west" onclick="toggleShiftMenu('west')">
+            <img src="" class="troop-badge" id="badge-west" style="display: none;">
+            <span class="object-label" data-i18n="west">Западная турель</span>
+        </div>
+        <div class="hotspot east" data-id="east" onclick="toggleShiftMenu('east')">
+            <img src="" class="troop-badge" id="badge-east" style="display: none;">
+            <span class="object-label" data-i18n="east">Восточная турель</span>
+        </div>
+
+        <!-- Оранжевые квадратные кнопки на карте -->
+        <button id="alliances-btn" class="map-btn alliances-btn-map" onclick="openAlliances()" data-i18n="alliances">Альянсы</button>
+        <button id="search-btn" class="map-btn search-btn-map" onclick="openSearch()" data-i18n="search">Поиск</button>
+        <button id="rules-btn" class="map-btn rules-btn-map" onclick="openRules()" data-i18n="rules">Правила</button>
+    </div>
+
+    <div class="modal-overlay" id="list-modal">
+        <div class="modal-box">
+            <div class="modal-header"><h3 id="modal-title"></h3><button class="close-btn" onclick="closeModal('list-modal')">×</button></div>
+            <div class="modal-body" id="modal-body"></div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="btn-copy-list" data-i18n="copy_list">Копировать список</button>
+                <button class="btn" id="btn-copy-both" data-i18n="copy_both">Копировать обе смены</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Окно «Альянсы» -->
+    <div class="modal-overlay" id="alliances-modal">
+        <div class="modal-box">
+            <div class="modal-header"><h3 data-i18n="alliances_title">Альянсы</h3><button class="close-btn" onclick="closeModal('alliances-modal')">×</button></div>
+            <div class="modal-body" id="alliances-body"></div>
+        </div>
+    </div>
+
+    <!-- Окно «Поиск» -->
+    <div class="modal-overlay" id="search-modal">
+        <div class="modal-box">
+            <div class="modal-header"><h3 data-i18n="search_title">Поиск игрока</h3><button class="close-btn" onclick="closeModal('search-modal')">×</button></div>
+            <div class="modal-body">
+                <input type="text" id="search-input" class="admin-input" placeholder="Введите никнейм..." oninput="performSearch()">
+                <div id="search-results"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Окно «Правила» -->
+    <div class="modal-overlay" id="rules-modal">
+        <div class="modal-box">
+            <div class="modal-header"><h3 data-i18n="rules_title">Правила</h3><button class="close-btn" onclick="closeModal('rules-modal')">×</button></div>
+            <div class="modal-body" id="rules-body"></div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="login-modal">
+        <div class="modal-box">
+            <div class="modal-header"><h3 data-i18n="login_title">Вход администратора</h3><button class="close-btn" onclick="closeModal('login-modal')">×</button></div>
+            <div class="modal-body">
+                <input type="text" id="login-user" class="admin-input" placeholder="Email (admin@pns.com)" style="margin-bottom:10px;"><br>
+                <input type="password" id="login-pass" class="admin-input" placeholder="Пароль">
+            </div>
+            <div class="modal-footer"><button class="btn btn-primary" onclick="adminLogin()" data-i18n="login">Войти</button></div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="confirm-modal">
+        <div class="modal-box">
+            <div class="modal-header"><h3 id="confirm-title">Подтверждение</h3><button class="close-btn" onclick="closeModal('confirm-modal')">×</button></div>
+            <div class="modal-body" id="confirm-text"></div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeModal('confirm-modal')" data-i18n="cancel">Отмена</button>
+                <button class="btn" id="confirm-yes-btn" data-i18n="delete">Удалить</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="admin-panel" id="admin-panel" style="display:none;">
+        <h2 data-i18n="admin_panel">Административная панель</h2><br>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:20px;">
+            <a id="download-template-btn" class="btn" href="#" download="template.xlsx" data-i18n="download_template" style="text-decoration:none; display:flex; align-items:center; justify-content:center;">Скачать шаблон Excel</a>
+            <button class="btn" onclick="document.getElementById('excel-upload').click()" data-i18n="import_excel">Импорт из Excel</button>
+            <input type="file" id="excel-upload" accept=".xlsx,.csv" style="display:none" onchange="handleExcelUpload(event)">
+        </div>
+        <div id="admin-content"></div>
+
+        <!-- Редактор правил в админ-панели -->
+        <div class="admin-section">
+            <h3 style="margin-bottom:10px; color:var(--accent);" data-i18n="rules_editor_title">Текст правил</h3>
+            <p style="font-size:12px; color:#888; margin-bottom:10px;">Отдельный текст для каждого языка. Сохранение — автоматически при выходе из поля (клик вне текста).</p>
+            <div style="margin-bottom:10px;">
+                <strong style="display:block; margin-bottom:5px;">🇷🇺 Русский:</strong>
+                <textarea id="rules-ru" class="admin-input" rows="5" style="resize:vertical;" placeholder="Текст правил на русском..." onchange="saveRules()"></textarea>
+            </div>
+            <div style="margin-bottom:10px;">
+                <strong style="display:block; margin-bottom:5px;">🇬🇧 English:</strong>
+                <textarea id="rules-en" class="admin-input" rows="5" style="resize:vertical;" placeholder="Rules text in English..." onchange="saveRules()"></textarea>
+            </div>
+            <div style="margin-bottom:10px;">
+                <strong style="display:block; margin-bottom:5px;">🇰🇷 한국어:</strong>
+                <textarea id="rules-ko" class="admin-input" rows="5" style="resize:vertical;" placeholder="규칙 텍스트..." onchange="saveRules()"></textarea>
+            </div>
+            <div style="margin-bottom:0;">
+                <strong style="display:block; margin-bottom:5px;">🇯🇵 日本語:</strong>
+                <textarea id="rules-ja" class="admin-input" rows="5" style="resize:vertical;" placeholder="ルールのテキスト..." onchange="saveRules()"></textarea>
+            </div>
+        </div>
+
+        <div class="danger-zone">
+            <h3 style="color:var(--danger);" data-i18n="danger_zone">Опасная зона</h3><br>
+            <button class="btn btn-danger" onclick="initiateDeleteAll()" data-i18n="delete_all">Удалить все списки</button>
+        </div>
+    </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+    try {
+        function getLocalData(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+        function setLocalData(key, val) { try { localStorage.setItem(key, val); } catch (e) {} }
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyAbRvZKKkBV5YAONloqBNpn-MyuaKQwbd8",
+            authDomain: "pns-techno.firebaseapp.com",
+            databaseURL: "https://pns-techno-default-rtdb.europe-west1.firebasedatabase.app",
+            projectId: "pns-techno",
+            storageBucket: "pns-techno.firebasestorage.app",
+            messagingSenderId: "109007752558",
+            appId: "1:109007752558:web:506f4f096263da6ca0457f",
+            measurementId: "G-VWE71FS0KY"
+        };
+
+        let db = null, auth = null, useFirebase = false;
+        try {
+            if (typeof firebase !== 'undefined' && firebaseConfig.apiKey && firebaseConfig.databaseURL) {
+                firebase.initializeApp(firebaseConfig);
+                db = firebase.database();
+                auth = firebase.auth();
+                useFirebase = true;
+            }
+        } catch (e) { useFirebase = false; }
+
+        const defaults = [
+            { id: 'tech', name_ru: 'Техноцентр', name_en: 'Tech Center', name_ko: '테크 센터', name_ja: 'テックセンター', tag: '' },
+            { id: 'north', name_ru: 'Северная турель', name_en: 'North Turret', name_ko: '북부 포탑', name_ja: '北タレット', tag: '' },
+            { id: 'south', name_ru: 'Южная турель', name_en: 'South Turret', name_ko: '남부 포탑', name_ja: '南タレット', tag: '' },
+            { id: 'west', name_ru: 'Западная турель', name_en: 'West Turret', name_ko: '서부 포탑', name_ja: '西タレット', tag: '' },
+            { id: 'east', name_ru: 'Восточная турель', name_en: 'East Turret', name_ko: '동부 포탑', name_ja: '東タレット', tag: '' }
+        ];
+
+        const rulesLangs = ['ru', 'en', 'ko', 'ja'];
+
+        function toArray(obj) {
+            if (Array.isArray(obj)) return obj;
+            if (obj && typeof obj === 'object') return Object.keys(obj).map(k => obj[k]);
+            return [];
+        }
+
+        function validateData(data) {
+            if (!data || typeof data !== 'object') data = {};
+            if (!data.objects) data.objects = [];
+            data.objects = toArray(data.objects);
+
+            if (!data.rules || typeof data.rules !== 'object') data.rules = {};
+            rulesLangs.forEach(l => { if (typeof data.rules[l] !== 'string') data.rules[l] = ''; });
+
+            defaults.forEach(def => {
+                let obj = data.objects.find(o => o.id === def.id);
+                if (!obj) {
+                    obj = { id: def.id, name_ru: def.name_ru, name_en: def.name_en, name_ko: def.name_ko, name_ja: def.name_ja, tag: '', shift1: [], shift2: [] };
+                    data.objects.push(obj);
+                } else {
+                    obj.shift1 = toArray(obj.shift1);
+                    obj.shift2 = toArray(obj.shift2);
+                    obj.name_ru = obj.name_ru || def.name_ru;
+                    obj.name_en = obj.name_en || def.name_en;
+                    obj.name_ko = obj.name_ko || def.name_ko;
+                    obj.name_ja = obj.name_ja || def.name_ja;
+                    if (!obj.tag) obj.tag = '';
+                }
+            });
+            return data;
+        }
+
+        let appData = validateData(null);
+        let currentLang = getLocalData('lang') || 'ru';
+        let isAdmin = false;
+        let activeObjectId = null;
+        let activeShift = null;
+
+        const i18n = {
+            ru: { tech: 'Техноцентр', north: 'Северная турель', south: 'Южная турель', west: 'Западная турель', east: 'Восточная турель', shift1: 'Смена 1', shift2: 'Смена 2', copy_list: 'Копировать список', copy_both: 'Копировать обе смены', list_copied: '✓ Список скопирован!', both_copied: '✓ Обе смены скопированы!', empty: 'Список пуст', login: 'Войти', logout: 'Выйти', login_title: 'Вход администратора', cancel: 'Отмена', delete: 'Удалить', confirm: 'Подтвердить', admin_panel: 'Административная панель', download_template: 'Скачать шаблон Excel', import_excel: 'Импорт из Excel', danger_zone: 'Опасная зона', delete_all: 'Удалить все списки', add_row: '+ Добавить строку', del_shift1: 'Удалить Смену 1', del_shift2: 'Удалить Смену 2', select_type: 'Тип войск (всегда англ.)', rules: 'Правила', rules_title: 'Правила', rules_empty: 'Правила пока не добавлены', rules_editor_title: 'Текст правил', rules_saved: '✓ Правила сохранены!', alliances: 'Альянсы', alliances_title: 'Альянсы', alliances_empty: 'Альянсы не найдены', alliances_found: 'Найдено альянсов', alliances_hint: 'Выберите смену, чтобы скопировать списки игроков альянса', alliance_label: 'Альянс', alliance_copied: '✓ Списки альянса скопированы!', players_count: 'игроков', both_shifts: 'Обе смены', search: 'Поиск', search_title: 'Поиск игрока', search_placeholder: 'Введите никнейм...', search_no_results: 'Ничего не найдено', search_found: 'Найдено', search_hint_click: 'Нажмите на игрока, чтобы скопировать все его записи', search_copied: '✓ Игрок скопирован!' },
+            en: { tech: 'Tech Center', north: 'North Turret', south: 'South Turret', west: 'West Turret', east: 'East Turret', shift1: 'Shift 1', shift2: 'Shift 2', copy_list: 'Copy list', copy_both: 'Copy both shifts', list_copied: '✓ List copied!', both_copied: '✓ Both shifts copied!', empty: 'List is empty', login: 'Log in', logout: 'Log out', login_title: 'Administrator Login', cancel: 'Cancel', delete: 'Delete', confirm: 'Confirm', admin_panel: 'Admin Panel', download_template: 'Download Excel template', import_excel: 'Import from Excel', danger_zone: 'Danger Zone', delete_all: 'Delete all lists', add_row: '+ Add row', del_shift1: 'Delete Shift 1', del_shift2: 'Delete Shift 2', select_type: 'Troop Type (EN only)', rules: 'Rules', rules_title: 'Rules', rules_empty: 'Rules have not been added yet', rules_editor_title: 'Rules text', rules_saved: '✓ Rules saved!', alliances: 'Alliances', alliances_title: 'Alliances', alliances_empty: 'No alliances found', alliances_found: 'Alliances found', alliances_hint: 'Select a shift to copy the alliance player lists', alliance_label: 'Alliance', alliance_copied: '✓ Alliance lists copied!', players_count: 'players', both_shifts: 'Both shifts', search: 'Search', search_title: 'Player Search', search_placeholder: 'Enter nickname...', search_no_results: 'Nothing found', search_found: 'Found', search_hint_click: 'Click a player to copy all their entries', search_copied: '✓ Player copied!' },
+            ko: { tech: '테크 센터', north: '북부 포탑', south: '남부 포탑', west: '서부 포탑', east: '동부 포탑', shift1: '교대 1', shift2: '교대 2', copy_list: '목록 복사', copy_both: '두 교대 모두 복사', list_copied: '✓ 목록이 복사되었습니다!', both_copied: '✓ 두 교대 모두 복사되었습니다!', empty: '목록이 비어 있습니다', login: '로그인', logout: '로그아웃', login_title: '관리자 로그인', cancel: '취소', delete: '삭제', confirm: '확인', admin_panel: '관리 패널', download_template: 'Excel 템플릿 다운로드', import_excel: 'Excel에서 가져오기', danger_zone: '위험 구역', delete_all: '모든 목록 삭제', add_row: '+ 행 추가', del_shift1: '교대 1 삭제', del_shift2: '교대 2 삭제', select_type: '병력 유형 (영어 전용)', rules: '규칙', rules_title: '규칙', rules_empty: '규칙이 아직 추가되지 않았습니다', rules_editor_title: '규칙 텍스트', rules_saved: '✓ 규칙이 저장되었습니다!', alliances: '동맹', alliances_title: '동맹', alliances_empty: '동맹을 찾을 수 없습니다', alliances_found: '발견된 동맹', alliances_hint: '교대를 선택하면 해당 동맹 플레이어 목록이 복사됩니다', alliance_label: '동맹', alliance_copied: '✓ 동맹 목록이 복사되었습니다!', players_count: '명', both_shifts: '두 교대 모두', search: '검색', search_title: '플레이어 검색', search_placeholder: '닉네임을 입력하세요...', search_no_results: '결과가 없습니다', search_found: '결과', search_hint_click: '플레이어를 클릭하면 모든 기록이 복사됩니다', search_copied: '✓ 플레이어가 복사되었습니다!' },
+            ja: { tech: 'テックセンター', north: '北タレット', south: '南タレット', west: '西タレット', east: '東タレット', shift1: 'シフト 1', shift2: 'シフト 2', copy_list: 'リストをコピー', copy_both: '両方のシフトをコピー', list_copied: '✓ リストがコピーされました！', both_copied: '✓ 両方のシフトがコピーされました！', empty: 'リストは空です', login: 'ログイン', logout: 'ログアウト', login_title: '管理者ログイン', cancel: 'キャンセル', delete: '削除', confirm: '確認', admin_panel: '管理パネル', download_template: 'Excelテンプレートをダウンロード', import_excel: 'Excelからインポート', danger_zone: '危険区域', delete_all: 'すべてのリストを削除', add_row: '+ 行を追加', del_shift1: 'シフト1を削除', del_shift2: 'シフト2を削除', select_type: '部隊タイプ (英語のみ)', rules: 'ルール', rules_title: 'ルール', rules_empty: 'ルールはまだ追加されていません', rules_editor_title: 'ルールのテキスト', rules_saved: '✓ ルールが保存されました！', alliances: '同盟', alliances_title: '同盟', alliances_empty: '同盟が見つかりません', alliances_found: '見つかった同盟', alliances_hint: 'シフトを選ぶとその同盟のプレイヤーリストがコピーされます', alliance_label: '同盟', alliance_copied: '✓ 同盟のリストがコピーされました！', players_count: '人', both_shifts: '両方のシフト', search: '検索', search_title: 'プレイヤー検索', search_placeholder: 'ニックネームを入力...', search_no_results: '見つかりませんでした', search_found: '検索結果', search_hint_click: 'プレイヤーをクリックすると、そのすべての記録がコピーされます', search_copied: '✓ プレイヤーがコピーされました！' }
+        };
+
+        function formatListForCopy(arr) {
+            return arr.map((p, i) => {
+                if (i === 0) return p + ' (cap)';
+                if (i === 1) return p + ' (sub)';
+                return p;
+            }).join('\n');
+        }
+
+        function loadData() {
+            try {
+                const localDataStr = getLocalData('pns_data');
+                if (localDataStr) appData = validateData(JSON.parse(localDataStr));
+                onDataLoaded();
+
+                if (useFirebase) {
+                    db.ref('pns_data').on('value', (snapshot) => {
+                        const data = snapshot.val();
+                        appData = validateData(data);
+                        if (!data) saveData();
+                        setLocalData('pns_data', JSON.stringify(appData));
+                        onDataLoaded();
+                    }, (error) => { console.error("Нет доступа к Firebase:", error); });
+                }
+            } catch(e) { console.error("Load error:", e); }
+        }
+
+        function onDataLoaded() {
+            applyTranslations();
+            updateBadges();
+            if (isAdmin && document.getElementById('admin-panel').style.display !== 'none') renderAdminPanel();
+            if (activeObjectId && document.getElementById('list-modal').classList.contains('active')) openListModal(activeObjectId, activeShift);
+        }
+
+        function updateBadges() {
+            appData.objects.forEach(obj => {
+                const badge = document.getElementById(`badge-${obj.id}`);
+                if (badge) {
+                    if (obj.tag === 'shooters') { badge.src = 'Shooters.png'; badge.style.display = 'block'; }
+                    else if (obj.tag === 'riders') { badge.src = 'Riders.png'; badge.style.display = 'block'; }
+                    else if (obj.tag === 'fighters') { badge.src = 'Fighters.png'; badge.style.display = 'block'; }
+                    else { badge.style.display = 'none'; }
+                }
+            });
+        }
+
+        function saveData() {
+            try {
+                appData = validateData(appData);
+                if (useFirebase) db.ref('pns_data').set(appData);
+                else setLocalData('pns_data', JSON.stringify(appData));
+            } catch(e) { console.error("Save error:", e); }
+        }
+
+        function applyTranslations() {
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if (i18n[currentLang][key]) el.innerText = i18n[currentLang][key];
+            });
+            document.getElementById('btn-ru').classList.toggle('active', currentLang === 'ru');
+            document.getElementById('btn-en').classList.toggle('active', currentLang === 'en');
+            document.getElementById('btn-ko').classList.toggle('active', currentLang === 'ko');
+            document.getElementById('btn-ja').classList.toggle('active', currentLang === 'ja');
+            document.getElementById('admin-btn').innerText = isAdmin ? i18n[currentLang].logout : i18n[currentLang].login;
+            // Плейсхолдер поля поиска переводится отдельно
+            const searchInput = document.getElementById('search-input');
+            if (searchInput) searchInput.placeholder = i18n[currentLang].search_placeholder;
+        }
+
+        function getRulesText() {
+            const r = appData.rules || {};
+            const chain = [currentLang, 'ru', 'en', 'ko', 'ja'];
+            for (const l of chain) {
+                if (r[l] && r[l].trim() !== '') return r[l];
+            }
+            return '';
+        }
+
+        function openRules() {
+            const btn = document.getElementById('rules-btn');
+            if (btn) btn.classList.add('active');
+            const body = document.getElementById('rules-body');
+            const text = getRulesText();
+            if (text === '') {
+                body.innerHTML = `<p class="empty-list">${i18n[currentLang].rules_empty}</p>`;
+            } else {
+                body.innerHTML = `<div class="rules-text">${escapeHtml(text)}</div>`;
+            }
+            document.getElementById('rules-modal').classList.add('active');
+        }
+
+        // ===== АЛЬЯНСЫ =====
+        // Альянс = первая часть записи до дефиса (формат: Альянс-Ник-Уровень-Кол-во).
+        function getAlliancesMap() {
+            const map = {};
+            appData.objects.forEach(obj => {
+                ['shift1', 'shift2'].forEach(shift => {
+                    (obj[shift] || []).forEach(entry => {
+                        const alliance = String(entry).split('-')[0].trim();
+                        if (!alliance) return;
+                        if (!map[alliance]) map[alliance] = { shift1: 0, shift2: 0, total: 0 };
+                        map[alliance][shift]++;
+                        map[alliance].total++;
+                    });
+                });
+            });
+            return map;
+        }
+
+        function openAlliances() {
+            const btn = document.getElementById('alliances-btn');
+            if (btn) btn.classList.add('active');
+            const body = document.getElementById('alliances-body');
+            const map = getAlliancesMap();
+            const names = Object.keys(map);
+
+            body.innerHTML = '';
+
+            if (names.length === 0) {
+                body.innerHTML = `<p class="empty-list">${i18n[currentLang].alliances_empty}</p>`;
+            } else {
+                // Сортировка: сначала альянсы с большим числом игроков, затем по алфавиту
+                names.sort((a, b) => map[b].total - map[a].total || a.localeCompare(b));
+
+                const info = document.createElement('p');
+                info.style.cssText = 'text-align:center; color:#888; font-size:13px; margin-bottom:6px;';
+                info.innerText = `${i18n[currentLang].alliances_found}: ${names.length}`;
+                body.appendChild(info);
+
+                const hint = document.createElement('p');
+                hint.style.cssText = 'text-align:center; color:#666; font-size:11px; margin-bottom:10px;';
+                hint.innerText = i18n[currentLang].alliances_hint;
+                body.appendChild(hint);
+
+                names.forEach(name => {
+                    const counts = map[name];
+                    const item = document.createElement('div');
+                    item.className = 'list-item alliance-item';
+
+                    // Строка: имя альянса + общее число игроков
+                    const header = document.createElement('div');
+                    header.className = 'alliance-item-header';
+                    const nameSpan = document.createElement('strong');
+                    nameSpan.innerText = name;
+                    const countSpan = document.createElement('span');
+                    countSpan.style.cssText = 'color:#888; font-size:12px; flex-shrink:0; margin-left:10px;';
+                    countSpan.innerText = `${counts.total} ${i18n[currentLang].players_count}`;
+                    header.appendChild(nameSpan);
+                    header.appendChild(countSpan);
+                    item.appendChild(header);
+
+                    // Ряд из 3 кнопок: Смена 1 | Смена 2 | Обе смены
+                    const btnsRow = document.createElement('div');
+                    btnsRow.className = 'alliance-btns';
+
+                    const mkBtn = (label, filter) => {
+                        const b = document.createElement('button');
+                        b.className = 'alliance-copy-btn';
+                        b.innerText = label;
+                        b.onclick = () => copyAllianceLists(name, filter);
+                        return b;
+                    };
+
+                    btnsRow.appendChild(mkBtn(`${i18n[currentLang].shift1} (${counts.shift1})`, 'shift1'));
+                    btnsRow.appendChild(mkBtn(`${i18n[currentLang].shift2} (${counts.shift2})`, 'shift2'));
+                    btnsRow.appendChild(mkBtn(i18n[currentLang].both_shifts, 'both'));
+
+                    item.appendChild(btnsRow);
+                    body.appendChild(item);
+                });
+            }
+            document.getElementById('alliances-modal').classList.add('active');
+        }
+
+        // Копирование альянса с фильтром по смене: 'shift1' | 'shift2' | 'both'
+        function copyAllianceLists(alliance, shiftFilter) {
+            try {
+                const shifts = shiftFilter === 'both' ? ['shift1', 'shift2'] : [shiftFilter];
+                const sections = [];
+                let total = 0;
+
+                appData.objects.forEach(obj => {
+                    shifts.forEach(shift => {
+                        const arr = obj[shift] || [];
+                        const lines = [];
+                        arr.forEach((entry, idx) => {
+                            const a = String(entry).split('-')[0].trim();
+                            if (a === alliance) {
+                                let line = `${lines.length + 1}. ${entry}`;
+                                if (idx === 0) line += ' (cap)';
+                                else if (idx === 1) line += ' (sub)';
+                                lines.push(line);
+                            }
+                        });
+                        if (lines.length > 0) {
+                            let header = `${obj['name_' + currentLang]} — ${i18n[currentLang][shift]}`;
+                            if (obj.tag) header += ` — ${obj.tag}`;
+                            sections.push(`[${header}]\n${lines.join('\n')}`);
+                            total += lines.length;
+                        }
+                    });
+                });
+
+                if (total === 0) { showToast(i18n[currentLang].empty); return; }
+
+                let title = `${i18n[currentLang].alliance_label}: ${alliance} (${total})`;
+                if (shiftFilter === 'shift1') title += ` — ${i18n[currentLang].shift1}`;
+                else if (shiftFilter === 'shift2') title += ` — ${i18n[currentLang].shift2}`;
+
+                const text = `${title}\n\n${sections.join('\n\n')}`;
+                copyText(text, i18n[currentLang].alliance_copied);
+            } catch(e) { alert('Ошибка при копировании альянса: ' + e.message); }
+        }
+
+        // ===== ПОИСК =====
+        function openSearch() {
+            const btn = document.getElementById('search-btn');
+            if (btn) btn.classList.add('active');
+            document.getElementById('search-modal').classList.add('active');
+            const input = document.getElementById('search-input');
+            if (input) {
+                performSearch(); // показать результаты прошлого запроса, если были
+                setTimeout(() => { try { input.focus(); } catch(e) {} }, 100);
+            }
+        }
+
+        // Нормализация Unicode (NFC) + регистронезависимость.
+        // Поддерживает кириллицу, латиницу, корейский, японский, символы и эмодзи.
+        function normSearch(s) {
+            s = String(s);
+            try { s = s.normalize('NFC'); } catch (e) {}
+            return s.toLowerCase();
+        }
+
+        // ===== НОВОЕ: извлечение никнейма из записи "Альянс-Ник-Уровень-Кол-во" =====
+        // Ник может содержать дефисы, поэтому отсекаем только первую часть (альянс)
+// и хвост (уровень T9..T14 + количество).
+        function extractNickname(entry) {
+            const parts = String(entry).split('-');
+            if (parts.length >= 4) {
+                const isLvl = /^[tт]\d+$/i.test(parts[parts.length - 2]);
+                const isQty = /^\d+$/.test(parts[parts.length - 1]);
+                if (isLvl && isQty) return parts.slice(1, parts.length - 2).join('-');
+            }
+            if (parts.length >= 3) {
+                const isLvl = /^[tт]\d+$/i.test(parts[parts.length - 1]);
+                if (isLvl) return parts.slice(1, parts.length - 1).join('-');
+            }
+            if (parts.length === 2) return parts[1];
+            return String(entry);
+        }
+
+        // Подсветка найденного фрагмента (безопасно: части экранируются отдельно)
+        function highlightMatch(entry, query) {
+            const lowerEntry = entry.toLowerCase();
+            const lowerQuery = query.toLowerCase();
+            const idx = lowerEntry.indexOf(lowerQuery);
+            if (idx === -1) return escapeHtml(entry);
+            return escapeHtml(entry.substring(0, idx)) +
+                '<span class="search-highlight">' + escapeHtml(entry.substring(idx, idx + query.length)) + '</span>' +
+                escapeHtml(entry.substring(idx + query.length));
+        }
+
+        // Живой поиск — клик копирует ВСЕ записи игрока (по нику, а не по точной записи)
+        function performSearch() {
+            const input = document.getElementById('search-input');
+            const resultsDiv = document.getElementById('search-results');
+            if (!input || !resultsDiv) return;
+
+            const query = input.value.trim();
+            resultsDiv.innerHTML = '';
+            if (!query) return;
+
+            const nq = normSearch(query);
+            const results = [];
+
+            appData.objects.forEach(obj => {
+                ['shift1', 'shift2'].forEach(shift => {
+                    (obj[shift] || []).forEach((entry, idx) => {
+                        const e = String(entry);
+                        if (normSearch(e).includes(nq)) {
+                            results.push({ obj: obj, shift: shift, idx: idx, entry: e });
+                        }
+                    });
+                });
+            });
+
+            if (results.length === 0) {
+                resultsDiv.innerHTML = `<p class="empty-list">${i18n[currentLang].search_no_results}</p>`;
+                return;
+            }
+
+            // ===== ИЗМЕНЕНО: подсчёт вхождений каждого игрока ПО НИКУ =====
+            // Игрок считается «тем же», если у него такой же ник — даже если
+            // уровень (T10/T11) или количество отличаются в разных списках.
+            const nickCounts = {};
+            results.forEach(r => {
+                const n = normSearch(extractNickname(r.entry));
+                nickCounts[n] = (nickCounts[n] || 0) + 1;
+            });
+
+            const info = document.createElement('p');
+            info.style.cssText = 'text-align:center; color:#888; font-size:13px; margin-bottom:6px;';
+            info.innerText = `${i18n[currentLang].search_found}: ${results.length}`;
+            resultsDiv.appendChild(info);
+
+            const hint = document.createElement('p');
+            hint.style.cssText = 'text-align:center; color:#666; font-size:11px; margin-bottom:10px;';
+            hint.innerText = i18n[currentLang].search_hint_click;
+            resultsDiv.appendChild(hint);
+
+            results.forEach(res => {
+                const item = document.createElement('div');
+                item.className = 'list-item search-result-item';
+
+                // Строка 1: где найден игрок (здание — смена — тэг) и позиция в списке
+                const meta = document.createElement('div');
+                meta.style.cssText = 'font-size:11px; color:#888; margin-bottom:3px; display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap;';
+                let locName = `${res.obj['name_' + currentLang]} — ${i18n[currentLang][res.shift]}`;
+                if (res.obj.tag) locName += ` — ${res.obj.tag}`;
+                const locSpan = document.createElement('span');
+                locSpan.innerText = locName;
+                meta.appendChild(locSpan);
+
+                const posSpan = document.createElement('span');
+                posSpan.style.color = '#aaa';
+                posSpan.style.flexShrink = '0';
+                let posText = '#' + (res.idx + 1);
+                if (res.idx === 0) { posText += ' (cap)'; posSpan.style.color = 'var(--cap-color)'; posSpan.style.fontWeight = 'bold'; }
+                else if (res.idx === 1) { posText += ' (sub)'; posSpan.style.color = 'var(--sub-color)'; posSpan.style.fontWeight = 'bold'; }
+                // ===== ИЗМЕНЕНО: бейдж ×N — по нику игрока =====
+                const resNick = normSearch(extractNickname(res.entry));
+                if (nickCounts[resNick] > 1) posText += ` ×${nickCounts[resNick]}`;
+                posSpan.innerText = posText;
+                meta.appendChild(posSpan);
+                item.appendChild(meta);
+
+                // Строка 2: запись игрока с подсветкой совпадения
+                const entryDiv = document.createElement('div');
+                entryDiv.style.wordBreak = 'break-word';
+                entryDiv.innerHTML = highlightMatch(res.entry, query);
+                item.appendChild(entryDiv);
+
+                // ===== ИЗМЕНЕНО: клик копирует ВСЕ записи игрока с таким же ником =====
+                // (в разных зданиях/сменах, с разным уровнем или количеством — все варианты)
+                item.onclick = () => {
+                    const nick = normSearch(extractNickname(res.entry));
+                    const samePlayer = results.filter(r => normSearch(extractNickname(r.entry)) === nick);
+                    const lines = [];
+                    samePlayer.forEach(r => {
+                        let loc = `${r.obj['name_' + currentLang]} — ${i18n[currentLang][r.shift]}`;
+                        if (r.obj.tag) loc += ` — ${r.obj.tag}`;
+                        let line = r.entry;
+                        if (r.idx === 0) line += ' (cap)';
+                        else if (r.idx === 1) line += ' (sub)';
+                        lines.push(loc + '\n' + line);
+                    });
+                    copyText(lines.join('\n\n'), i18n[currentLang].search_copied);
+                };
+                resultsDiv.appendChild(item);
+            });
+        }
+
+        function renderRulesEditor() {
+            rulesLangs.forEach(lang => {
+                const ta = document.getElementById('rules-' + lang);
+                if (ta && document.activeElement !== ta) {
+                    ta.value = (appData.rules && appData.rules[lang]) || '';
+                }
+            });
+        }
+
+        function saveRules() {
+            if (!appData.rules) appData.rules = {};
+            rulesLangs.forEach(lang => {
+                const ta = document.getElementById('rules-' + lang);
+                if (ta) appData.rules[lang] = ta.value;
+            });
+            saveData();
+            showToast(i18n[currentLang].rules_saved);
+        }
+
+        function setLang(lang) {
+            currentLang = lang; setLocalData('lang', lang); applyTranslations();
+            if (activeObjectId) openListModal(activeObjectId, activeShift);
+            if (document.getElementById('rules-modal').classList.contains('active')) openRules();
+            if (document.getElementById('alliances-modal').classList.contains('active')) openAlliances();
+            if (document.getElementById('search-modal').classList.contains('active')) performSearch();
+        }
+
+        function toggleShiftMenu(id) {
+            const menu = document.querySelector(`.shift-menu[data-menu-for="${id}"]`);
+            document.querySelectorAll('.shift-menu').forEach(m => m.remove());
+            document.querySelectorAll('.hotspot').forEach(h => h.classList.remove('active'));
+            if (!menu) {
+                const hotspot = document.querySelector(`.hotspot[data-id="${id}"]`);
+                if(!hotspot) return;
+                hotspot.classList.add('active');
+                activeObjectId = id;
+                const newMenu = document.createElement('div');
+                newMenu.className = 'shift-menu';
+                newMenu.dataset.menuFor = id;
+                newMenu.style.display = 'flex';
+                newMenu.innerHTML = `<button onclick="openListModal('${id}', 'shift1')">${i18n[currentLang].shift1}</button><button onclick="openListModal('${id}', 'shift2')">${i18n[currentLang].shift2}</button>`;
+                hotspot.appendChild(newMenu);
+            } else { activeObjectId = null; }
+        }
+
+        function openListModal(id, shift) {
+            activeObjectId = id; activeShift = shift;
+            const obj = appData.objects.find(o => o.id === id);
+            if (!obj) return;
+            
+            let title = `${obj['name_' + currentLang]} — ${i18n[currentLang][shift]}`;
+            if (obj.tag) title += ` — ${obj.tag}`;
+            
+            document.getElementById('modal-title').innerText = title;
+            const body = document.getElementById('modal-body');
+            let arr = obj[shift] || [];
+            
+            if (arr.length === 0) {
+                body.innerHTML = `<p class="empty-list">${i18n[currentLang].empty}</p>`;
+            } else {
+                body.innerHTML = arr.map((p, i) => {
+                    let suffix = '';
+                    let style = '';
+                    if (i === 0) { suffix = ' (cap)'; style = 'style="color: var(--cap-color); font-weight: bold;"'; }
+                    else if (i === 1) { suffix = ' (sub)'; style = 'style="color: var(--sub-color); font-weight: bold;"'; }
+                    return `<div class="list-item" ${style}>${i+1}. ${escapeHtml(p)}${suffix}</div>`;
+                }).join('');
+            }
+            
+            document.getElementById('btn-copy-list').setAttribute('onclick', `copyList('${id}', '${shift}')`);
+            document.getElementById('btn-copy-both').setAttribute('onclick', `copyBothShifts('${id}')`);
+            
+            document.getElementById('list-modal').classList.add('active');
+        }
+
+        function escapeHtml(text) { if (typeof text !== 'string') return ''; const div = document.createElement('div'); div.textContent = text; return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('active');
+            if (id === 'rules-modal') {
+                const btn = document.getElementById('rules-btn');
+                if (btn) btn.classList.remove('active');
+            }
+            if (id === 'alliances-modal') {
+                const btn = document.getElementById('alliances-btn');
+                if (btn) btn.classList.remove('active');
+            }
+            if (id === 'search-modal') {
+                const btn = document.getElementById('search-btn');
+                if (btn) btn.classList.remove('active');
+            }
+        }
+
+        function fallbackCopy(text, successMsg) {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed'; ta.style.top = '0'; ta.style.left = '0';
+            ta.style.width = '2em'; ta.style.height = '2em'; ta.style.padding = '0';
+            ta.style.border = 'none'; ta.style.outline = 'none'; ta.style.boxShadow = 'none';
+            ta.style.background = 'transparent'; ta.style.color = 'transparent';
+            document.body.appendChild(ta);
+            ta.focus(); ta.select();
+            if (navigator.userAgent.match(/ipad|iphone/i)) {
+                const range = document.createRange();
+                range.selectNodeContents(ta);
+                const sel = window.getSelection();
+                sel.removeAllRanges(); sel.addRange(range);
+                ta.setSelectionRange(0, text.length);
+            }
+            try {
+                const ok = document.execCommand('copy');
+                document.body.removeChild(ta);
+                if (ok) showToast(successMsg);
+                else window.prompt("Браузер заблокировал автокопирование. Скопируйте текст вручную (Ctrl+C / Cmd+C):", text);
+            } catch (err) {
+                document.body.removeChild(ta);
+                window.prompt("Браузер заблокировал автокопирование. Скопируйте текст вручную (Ctrl+C / Cmd+C):", text);
+            }
+        }
+
+        function copyText(text, successMsg) {
+            if (!text || text.trim() === '') { showToast(i18n[currentLang].empty); return; }
+            try {
+                if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text).then(() => showToast(successMsg)).catch(() => fallbackCopy(text, successMsg));
+                } else { fallbackCopy(text, successMsg); }
+            } catch (e) { fallbackCopy(text, successMsg); }
+        }
+
+        function copyList(id, shift) {
+            try {
+                const obj = appData.objects.find(o => o.id === id);
+                if (!obj) { alert('Объект не найден!'); return; }
+                if (!obj[shift]) { alert('Смена не найдена!'); return; }
+                let title = `${obj['name_' + currentLang]} — ${i18n[currentLang][shift]}`;
+                if (obj.tag) title += ` — ${obj.tag}`;
+                const listText = formatListForCopy(obj[shift]);
+                const textToCopy = listText ? `${title}\n${listText}` : title;
+                copyText(textToCopy, i18n[currentLang].list_copied);
+            } catch(e) { alert('Ошибка при копировании списка: ' + e.message); }
+        }
+
+        function copyBothShifts(id) {
+            try {
+                const obj = appData.objects.find(o => o.id === id);
+                if (!obj) { alert('Объект не найден!'); return; }
+                const s1 = obj.shift1 || [], s2 = obj.shift2 || [];
+                let t1 = `${obj['name_' + currentLang]} — ${i18n[currentLang].shift1}`;
+                if (obj.tag) t1 += ` — ${obj.tag}`;
+                let t2 = `${obj['name_' + currentLang]} — ${i18n[currentLang].shift2}`;
+                if (obj.tag) t2 += ` — ${obj.tag}`;
+                const text = `${t1}\n${formatListForCopy(s1)}\n\n${t2}\n${formatListForCopy(s2)}`;
+                copyText(text, i18n[currentLang].both_copied);
+            } catch(e) { alert('Ошибка при копировании смен: ' + e.message); }
+        }
+
+        function showToast(msg) { const toast = document.getElementById('toast'); toast.innerText = msg; toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 2000); }
+        
+        function toggleAdmin() {
+            if (isAdmin) {
+                firebase.auth().signOut();
+                isAdmin = false;
+                document.getElementById('admin-panel').style.display = 'none';
+                applyTranslations();
+            } else {
+                document.getElementById('login-modal').classList.add('active');
+            }
+        }
+        
+        function adminLogin() {
+            const email = document.getElementById('login-user').value;
+            const pass = document.getElementById('login-pass').value;
+            if (!email || !pass) { alert('Введите email и пароль'); return; }
+            auth.signInWithEmailAndPassword(email, pass)
+                .then(() => {
+                    closeModal('login-modal');
+                    document.getElementById('admin-panel').style.display = 'block';
+                    applyTranslations();
+                    renderAdminPanel();
+                })
+                .catch((error) => { alert('Неверный логин или пароль'); });
+        }
+
+        if (useFirebase && auth) {
+            auth.onAuthStateChanged((user) => {
+                if (user) { isAdmin = true; document.getElementById('admin-panel').style.display = 'block'; }
+                else { isAdmin = false; document.getElementById('admin-panel').style.display = 'none'; }
+                applyTranslations(); onDataLoaded();
+            });
+        }
+
+        function renderAdminPanel() {
+            try {
+                const container = document.getElementById('admin-content');
+                if (!container || !appData || !appData.objects) return;
+                container.innerHTML = '';
+                appData.objects.forEach(obj => {
+                    const div = document.createElement('div');
+                    div.className = 'admin-section';
+                    div.innerHTML = `
+                        <h3 style="margin-bottom:10px; color:var(--accent);">${escapeHtml(obj['name_' + currentLang] || obj.id)}</h3>
+                        <div style="margin-bottom:15px;">
+                            <strong style="display:block; margin-bottom:5px;">${i18n[currentLang].select_type}:</strong>
+                            <select class="admin-input" onchange="updateTag('${obj.id}', this.value)">
+                                <option value="">-- None --</option>
+                                <option value="shooters" ${obj.tag === 'shooters' ? 'selected' : ''}>Shooters</option>
+                                <option value="riders" ${obj.tag === 'riders' ? 'selected' : ''}>Riders</option>
+                                <option value="fighters" ${obj.tag === 'fighters' ? 'selected' : ''}>Fighters</option>
+                            </select>
+                        </div>
+                        <div style="margin-bottom:15px;"><strong>${i18n[currentLang].shift1}</strong><div id="admin-${obj.id}-shift1"></div><button class="btn" style="margin-top:5px;" onclick="addRow('${obj.id}', 'shift1')">${i18n[currentLang].add_row}</button></div>
+                        <div style="margin-bottom:15px;"><strong>${i18n[currentLang].shift2}</strong><div id="admin-${obj.id}-shift2"></div><button class="btn" style="margin-top:5px;" onclick="addRow('${obj.id}', 'shift2')">${i18n[currentLang].add_row}</button></div>
+                        <button class="btn btn-danger" onclick="deleteShift('${obj.id}', 'shift1')">${i18n[currentLang].del_shift1}</button>
+                        <button class="btn btn-danger" onclick="deleteShift('${obj.id}', 'shift2')">${i18n[currentLang].del_shift2}</button>`;
+                    container.appendChild(div);
+                    renderListInputs(obj.id, 'shift1');
+                    renderListInputs(obj.id, 'shift2');
+                });
+                renderRulesEditor();
+            } catch(e) { console.error("Render admin error:", e); }
+        }
+
+        function updateTag(objId, value) {
+            try {
+                const obj = appData.objects.find(o => o.id === objId);
+                if (obj) {
+                    obj.tag = value;
+                    saveData();
+                    updateBadges();
+                    if (activeObjectId && document.getElementById('list-modal').classList.contains('active')) {
+                        openListModal(activeObjectId, activeShift);
+                    }
+                }
+            } catch(e) { console.error("Update tag error:", e); }
+        }
+
+        function renderListInputs(objId, shift) {
+            try {
+                const obj = appData.objects.find(o => o.id === objId);
+                const container = document.getElementById(`admin-${objId}-${shift}`);
+                if (!container || !obj) return;
+                container.innerHTML = '';
+                if (!obj[shift]) obj[shift] = [];
+                obj[shift].forEach((player, index) => {
+                    const row = document.createElement('div');
+                    row.className = 'admin-row';
+                    let badge = '';
+                    if (index === 0) badge = '<span style="color:var(--cap-color); font-size:12px; margin-right:5px; font-weight:bold;">CAP:</span>';
+                    else if (index === 1) badge = '<span style="color:var(--sub-color); font-size:12px; margin-right:5px; font-weight:bold;">SUB:</span>';
+                    row.innerHTML = `${badge}<input type="text" class="admin-input" value="${escapeHtml(player)}" onchange="updateRow('${objId}', '${shift}', ${index}, this.value)"><button class="icon-btn" onclick="moveRow('${objId}', '${shift}', ${index}, -1)">↑</button><button class="icon-btn" onclick="moveRow('${objId}', '${shift}', ${index}, 1)">↓</button><button class="icon-btn danger" onclick="removeRow('${objId}', '${shift}', ${index})">×</button>`;
+                    container.appendChild(row);
+                });
+            } catch(e) {}
+        }
+
+        function addRow(objId, shift) { try { const obj = appData.objects.find(o => o.id === objId); if (!obj) return; if (!obj[shift]) obj[shift] = []; obj[shift].push(''); saveData(); renderListInputs(objId, shift); } catch(e){} }
+        function updateRow(objId, shift, index, value) { try { const obj = appData.objects.find(o => o.id === objId); if (obj && obj[shift]) { obj[shift][index] = value; saveData(); } } catch(e){} }
+        function moveRow(objId, shift, index, dir) { try { const obj = appData.objects.find(o => o.id === objId); if (!obj || !obj[shift]) return; const newIndex = index + dir; if (newIndex < 0 || newIndex >= obj[shift].length) return; [obj[shift][index], obj[shift][newIndex]] = [obj[shift][newIndex], obj[shift][index]]; saveData(); renderListInputs(objId, shift); } catch(e){} }
+        function removeRow(objId, shift, index) { try { const obj = appData.objects.find(o => o.id === objId); if (!obj || !obj[shift]) return; obj[shift].splice(index, 1); saveData(); renderListInputs(objId, shift); } catch(e){} }
+        function deleteShift(objId, shift) { try { const obj = appData.objects.find(o => o.id === objId); if (!obj) return; showConfirm(`${i18n[currentLang].delete} ${obj['name_' + currentLang]} — ${i18n[currentLang][shift]}?`, () => { obj[shift] = []; saveData(); renderAdminPanel(); }); } catch(e){} }
+        function initiateDeleteAll() { showConfirm('ВНИМАНИЕ! Будут удалены списки ВСЕХ зданий. Введите "УДАЛИТЬ" для подтверждения.', () => { try { appData.objects.forEach(o => { o.shift1 = []; o.shift2 = []; }); saveData(); renderAdminPanel(); showToast('Все списки удалены'); } catch(e){} }, true); }
+
+        function showConfirm(text, callback, requireText = false, confirmBtnText = null) {
+            document.getElementById('confirm-text').innerHTML = text + (requireText ? `<br><br><input type='text' id='confirm-input' class='admin-input' placeholder='УДАЛИТЬ'>` : '');
+            document.getElementById('confirm-modal').classList.add('active');
+            const btn = document.getElementById('confirm-yes-btn');
+            const newBtn = btn.cloneNode(true);
+            btn.parentNode.replaceChild(newBtn, btn);
+            if (confirmBtnText) { newBtn.innerText = confirmBtnText; newBtn.classList.remove('btn-danger'); newBtn.classList.add('btn-primary'); }
+            else { newBtn.innerText = i18n[currentLang].delete; newBtn.classList.add('btn-danger'); newBtn.classList.remove('btn-primary'); }
+            newBtn.onclick = () => { if (requireText) { const val = document.getElementById('confirm-input').value; if (val !== 'УДАЛИТЬ') { alert('Неверное слово подтверждения'); return; } } callback(); closeModal('confirm-modal'); };
+        }
+
+        // ===== Шаблон Excel: разметка эталонного файла + 30 пустых строк =====
+        // + раскрывающиеся списки (Rider/Shooter/Fighter) справа от каждого "-"
+        // + условное форматирование: пустая ячейка со списком залита красным
+        function initTemplateDownload() {
+            try {
+                const EMPTY_ROWS = 30;
+                const btn = document.getElementById('download-template-btn');
+                if (!btn) return;
+
+                // --- Структура секций (разметка не менялась) ---
+                const sec1Header = ["", "", "HUB", "-", "", "", "", "", "HUB", "-", "", "", "", "", "West", "-", "", "", "", "", "West", "-", ""];
+                const sec1Shifts = ["", "", "1 shift", "", "", "", "", "", "2 shift", "", "", "", "", "", "1 shift", "", "", "", "", "", "2 shift", "", ""];
+                const sec1Cols   = ["", "Alliance", "Nickname", "lvl", "quantity", "", "", "Alliance", "Nickname", "lvl", "quantity", "", "", "Alliance", "Nickname", "lvl", "quantity", "", "", "Alliance", "Nickname", "lvl", "quantity"];
+
+                const sec2Header = ["", "", "North", "-", "", "", "", "", "North", "-", "", "", "", "", "East", "-", "", "", "", "", "East", "-", ""];
+                const sec2Shifts = ["", "", "1 shift", "", "", "", "", "", "2 shift", "", "", "", "", "", "1 shift", "", "", "", "", "", "2 shift", "", ""];
+                const sec2Cols   = ["", "Alliance", "Nickname", "lvl", "quantity", "", "", "Alliance", "Nickname", "lvl", "quantity", "", "", "Alliance", "Nickname", "lvl", "quantity", "", "", "Alliance", "Nickname", "lvl", "quantity"];
+
+                const sec3Header = ["", "", "South", "-", "", "", "", "", "South", "-", ""];
+                const sec3Shifts = ["", "", "1 shift", "", "", "", "", "", "2 shift", "", ""];
+                const sec3Cols   = ["", "Alliance", "Nickname", "lvl", "quantity", "", "", "Alliance", "Nickname", "lvl", "quantity"];
+
+                const refRows = [
+                    ["", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "Rider", ""],
+                    ["", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "Shooter", ""],
+                    ["", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "Fighter", ""]
+                ];
+
+                // --- Сборка всех строк ---
+                const templateRows = [];
+                const sectionHeaderRows = [];
+
+                [[sec1Header, sec1Shifts, sec1Cols], [sec2Header, sec2Shifts, sec2Cols], [sec3Header, sec3Shifts, sec3Cols]].forEach(section => {
+                    sectionHeaderRows.push(templateRows.length);
+                    templateRows.push(section[0], section[1], section[2]);
+                    for (let i = 0; i < EMPTY_ROWS; i++) templateRows.push([]);
+                });
+                refRows.forEach(r => templateRows.push(r));
+
+                // --- Основной путь: ExcelJS (списки + условное форматирование) ---
+                if (typeof ExcelJS !== 'undefined') {
+                    try {
+                        const workbook = new ExcelJS.Workbook();
+                        const worksheet = workbook.addWorksheet('Лист1');
+                        templateRows.forEach(row => worksheet.addRow(row));
+
+                        let rulePriority = 1;
+
+                        sectionHeaderRows.forEach(rIdx => {
+                            templateRows[rIdx].forEach((val, cIdx) => {
+                                if (String(val).trim() === '-') {
+                                    const row = rIdx + 1;
+                                    const col = cIdx + 2;
+                                    const cell = worksheet.getCell(row, col);
+
+                                    // Раскрывающийся список
+                                    cell.dataValidation = {
+                                        type: 'list',
+                                        allowBlank: true,
+                                        formulae: ['"Rider,Shooter,Fighter"'],
+                                        showErrorMessage: true
+                                    };
+
+                                    // Условное форматирование: красная заливка, пока ячейка пустая
+                                    const ref = cell.address;
+                                    worksheet.addConditionalFormatting({
+                                        ref: ref,
+                                        rules: [{
+                                            type: 'expression',
+                                            formulae: [`LEN(TRIM(${ref}))=0`],
+                                            style: {
+                                                fill: {
+                                                    type: 'pattern',
+                                                    pattern: 'solid',
+                                                    bgColor: { argb: 'FFDC3545' }
+                                                }
+                                            },
+                                            priority: rulePriority++
+                                        }]
+                                    });
+                                }
+                            });
+                        });
+
+                        workbook.xlsx.writeBuffer().then(buffer => {
+                            const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+                            btn.href = URL.createObjectURL(blob);
+                            btn.download = 'template.xlsx';
+                        }).catch(err => {
+                            console.error("ExcelJS write error:", err);
+                            generateFallbackTemplate(templateRows, btn);
+                        });
+                        return;
+                    } catch (e) { console.error("ExcelJS error:", e); }
+                }
+
+                // --- Запасной путь: без списков и форматирования ---
+                generateFallbackTemplate(templateRows, btn);
+            } catch(e) { console.error("Init download error:", e); }
+        }
+
+        // Запасная генерация шаблона (SheetJS → CSV), если ExcelJS недоступен
+        function generateFallbackTemplate(templateRows, btn) {
+            try {
+                let dataUri = '', filename = 'template.xlsx';
+                if (typeof XLSX !== 'undefined') {
+                    const ws = XLSX.utils.aoa_to_sheet(templateRows);
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, ws, 'Лист1');
+                    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
+                    dataUri = 'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,' + wbout;
+                }
+                if (!dataUri) {
+                    const csvContent = "\ufeff" + templateRows.map(r => r.join(',')).join('\n');
+                    const csvBase64 = btoa(unescape(encodeURIComponent(csvContent)));
+                    dataUri = 'data:text/csv;charset=utf-8;base64,' + csvBase64;
+                    filename = 'template.csv';
+                }
+                btn.href = dataUri;
+                btn.download = filename;
+            } catch(e) { console.error("Fallback template error:", e); }
+        }
+
+        function handleExcelUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const wb = XLSX.read(data, { type: 'array' });
+                    const ws = wb.Sheets[wb.SheetNames[0]];
+                    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+                    let tempData = { objects: [] };
+                    defaults.forEach(def => { tempData.objects.push({ id: def.id, tag: '', shift1: [], shift2: [] }); });
+
+                    let foundCount = 0;
+
+                    for (let r = 0; r < rows.length; r++) {
+                        const row = rows[r] || [];
+                        for (let c = 0; c < row.length; c++) {
+                            const cellVal = String(row[c] || '').trim();
+                            if (!cellVal) continue;
+
+                            let objId = '';
+                            if (cellVal.includes('HUB')) objId = 'tech';
+                            else if (cellVal.includes('South')) objId = 'south';
+                            else if (cellVal.includes('West')) objId = 'west';
+                            else if (cellVal.includes('North')) objId = 'north';
+                            else if (cellVal.includes('East')) objId = 'east';
+
+                            if (objId) {
+                                let tag = '';
+                                for (let i = 0; i <= 5; i++) {
+                                    const checkVal = String(row[c+i] || '').trim().toLowerCase();
+                                    if (checkVal.includes('rider')) { tag = 'riders'; break; }
+                                    if (checkVal.includes('shooter')) { tag = 'shooters'; break; }
+                                    if (checkVal.includes('fighter')) { tag = 'fighters'; break; }
+                                }
+                                
+                                const obj = tempData.objects.find(o => o.id === objId);
+                                if (obj && tag) obj.tag = tag;
+
+                                for (let r2 = r + 1; r2 < rows.length; r2++) {
+                                    const row2 = rows[r2] || [];
+                                    const cellVal2 = String(row2[c] || '').trim();
+
+                                    if (cellVal2.includes('HUB') || cellVal2.includes('South') || cellVal2.includes('West') || cellVal2.includes('North') || cellVal2.includes('East')) {
+                                        break;
+                                    }
+
+                                    let shift = '';
+                                    if (cellVal2.includes('1 shift') || cellVal2.includes('1 смена')) shift = 'shift1';
+                                    else if (cellVal2.includes('2 shift') || cellVal2.includes('2 смена')) shift = 'shift2';
+
+                                    if (shift) {
+                                        let colMap = { alliance: -1, nickname: -1, lvl: -1, quantity: -1 };
+                                        let headerRowIdx = -1;
+                                        
+                                        // Берём БЛИЖАЙШИЙ заголовок к маркеру смены
+                                        for (let r3 = r2 + 1; r3 < rows.length && r3 <= r2 + 3; r3++) {
+                                            const row3 = rows[r3] || [];
+                                            let foundAnyHeader = false;
+                                            for (let c3 = Math.max(0, c - 2); c3 <= c + 5; c3++) {
+                                                const headerVal = String(row3[c3] || '').trim().toLowerCase();
+                                                const dist = Math.abs(c3 - c);
+                                                if (headerVal.includes('alliance')) {
+                                                    if (colMap.alliance === -1 || dist < Math.abs(colMap.alliance - c)) colMap.alliance = c3;
+                                                    foundAnyHeader = true;
+                                                }
+                                                else if (headerVal.includes('nickname')) {
+                                                    if (colMap.nickname === -1 || dist < Math.abs(colMap.nickname - c)) colMap.nickname = c3;
+                                                    foundAnyHeader = true;
+                                                }
+                                                else if (headerVal.includes('lvl') || headerVal.includes('level')) {
+                                                    if (colMap.lvl === -1 || dist < Math.abs(colMap.lvl - c)) colMap.lvl = c3;
+                                                    foundAnyHeader = true;
+                                                }
+                                                else if (headerVal.includes('quantity') || headerVal.includes('size')) {
+                                                    if (colMap.quantity === -1 || dist < Math.abs(colMap.quantity - c)) colMap.quantity = c3;
+                                                    foundAnyHeader = true;
+                                                }
+                                            }
+                                            if (foundAnyHeader) { headerRowIdx = r3; break; }
+                                        }
+
+                                        if (headerRowIdx === -1) {
+                                            colMap = { alliance: c, nickname: c+1, lvl: c+2, quantity: c+3 };
+                                            headerRowIdx = r2;
+                                        }
+
+                                        for (let r3 = headerRowIdx + 1; r3 < rows.length; r3++) {
+                                            const row3 = rows[r3] || [];
+                                            
+                                            const alliance = colMap.alliance !== -1 ? String(row3[colMap.alliance] || '').trim() : '';
+                                            const nickname = colMap.nickname !== -1 ? String(row3[colMap.nickname] || '').trim() : '';
+                                            const lvl = colMap.lvl !== -1 ? String(row3[colMap.lvl] || '').trim() : '';
+                                            const quantity = colMap.quantity !== -1 ? String(row3[colMap.quantity] || '').trim() : '';
+
+                                            if (!alliance && !nickname && !lvl && !quantity) { break; }
+                                            
+                                            const lowerAlliance = alliance.toLowerCase();
+                                            const lowerNickname = nickname.toLowerCase();
+                                            if (lowerAlliance.includes('shift') || lowerAlliance.includes('смена') || 
+                                                lowerNickname.includes('shift') || lowerNickname.includes('смена') ||
+                                                lowerAlliance.includes('hub') || lowerAlliance.includes('west') || lowerAlliance.includes('north') || lowerAlliance.includes('south') || lowerAlliance.includes('east') ||
+                                                lowerNickname.includes('hub') || lowerNickname.includes('west') || lowerNickname.includes('north') || lowerNickname.includes('south') || lowerNickname.includes('east')) {
+                                                break;
+                                            }
+
+                                            if (!nickname) { continue; }
+
+                                            const parts = [alliance, nickname, lvl, quantity].filter(p => p && p !== '*' && p !== '-');
+                                            if (parts.length > 0) {
+                                                if (obj) {
+                                                    if (!obj[shift]) obj[shift] = [];
+                                                    obj[shift].push(parts.join('-'));
+                                                    foundCount++;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    let previewHtml = `<p>Найдено записей: ${foundCount}</p><div style="max-height:200px; overflow-y:auto; border:1px solid #444; padding:5px; margin:10px 0;">`;
+                    tempData.objects.forEach(o => {
+                        if (o.shift1.length > 0 || o.shift2.length > 0 || o.tag) {
+                            const def = defaults.find(d => d.id === o.id);
+                            const name = def ? def.name_ru : o.id;
+                            previewHtml += `<div style="margin-top:5px;"><b>${name} (${o.tag || 'N/A'})</b><br>S1: ${o.shift1.join(', ')}<br>S2: ${o.shift2.join(', ')}</div>`;
+                        }
+                    });
+                    previewHtml += '</div>';
+
+                    showConfirm(previewHtml + '<br>Импорт заменит существующие данные. Продолжить?', () => {
+                        try {
+                            appData.objects.forEach(o => {
+                                const tempObj = tempData.objects.find(to => to.id === o.id);
+                                if (tempObj) {
+                                    o.shift1 = tempObj.shift1;
+                                    o.shift2 = tempObj.shift2;
+                                    if (tempObj.tag) o.tag = tempObj.tag;
+                                } else {
+                                    o.shift1 = []; o.shift2 = [];
+                                }
+                            });
+                            saveData();
+                            renderAdminPanel();
+                            updateBadges();
+                            showToast('Импорт завершен');
+                        } catch (err) { alert('Ошибка при импорте: ' + err.message); }
+                    }, false, i18n[currentLang].confirm);
+
+                } catch (err) { alert('Не удалось прочитать файл Excel: ' + err.message); }
+            };
+            reader.readAsArrayBuffer(file);
+            event.target.value = '';
+        }
+
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.hotspot') && !e.target.closest('.shift-menu')) {
+                document.querySelectorAll('.shift-menu').forEach(m => m.remove());
+                document.querySelectorAll('.hotspot').forEach(h => h.classList.remove('active'));
+            }
+        });
+
+                // Принудительный запуск фонового видео + диагностика
+        (function initBgVideo() {
+            const video = document.getElementById('bg-video');
+            if (!video) return;
+
+            // Диагностика: открыть консоль (F12 → Console) и обновить страницу
+            video.addEventListener('loadeddata', () => console.log('✅ Видео загружено и играет'));
+            video.addEventListener('error', () => console.error('❌ Ошибка: файл не найден (проверьте имя и регистр!) или формат не поддерживается (нужен MP4/H.264)'));
+            video.addEventListener('stalled', () => console.warn('⚠️ Загрузка видео застопорилась — файл слишком большой?'));
+
+            const tryPlay = () => { video.play().catch(err => console.warn('Автозапуск заблокирован:', err.name)); };
+            tryPlay();
+            document.addEventListener('DOMContentLoaded', tryPlay);
+            document.addEventListener('click', tryPlay, { once: true });
+            document.addEventListener('touchstart', tryPlay, { once: true });
+            video.addEventListener('pause', () => { if (!document.hidden) tryPlay(); });
+            video.addEventListener('ended', () => tryPlay());
+        })();
+
+        loadData();
+        initTemplateDownload(); 
+    } catch (fatalError) {
+        console.error("Критическая ошибка инициализации:", fatalError);
+    }
+</script>
+</body>
+</html>
