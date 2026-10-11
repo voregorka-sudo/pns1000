@@ -390,16 +390,16 @@
 
         function loadData() {
             try {
-                const localDataStr = getLocalData('pns_data');
+                const localDataStr = getLocalData('pns_data_2');
                 if (localDataStr) appData = validateData(JSON.parse(localDataStr));
                 onDataLoaded();
 
                 if (useFirebase) {
-                    db.ref('pns_data').on('value', (snapshot) => {
+                    db.ref('pns_data_2').on('value', (snapshot) => {
                         const data = snapshot.val();
                         appData = validateData(data);
                         if (!data) saveData();
-                        setLocalData('pns_data', JSON.stringify(appData));
+                        setLocalData('pns_data_2', JSON.stringify(appData));
                         onDataLoaded();
                     }, (error) => { console.error("Нет доступа к Firebase:", error); });
                 }
@@ -428,8 +428,8 @@
         function saveData() {
             try {
                 appData = validateData(appData);
-                if (useFirebase) db.ref('pns_data').set(appData);
-                else setLocalData('pns_data', JSON.stringify(appData));
+                if (useFirebase) db.ref('pns_data_2').set(appData);
+                else setLocalData('pns_data_2', JSON.stringify(appData));
             } catch(e) { console.error("Save error:", e); }
         }
 
